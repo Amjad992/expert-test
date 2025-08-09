@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Mail, User, CheckCircle, Building2 } from 'lucide-react';
+import { Mail, User, CheckCircle, Building2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,13 +10,11 @@ export const LeadCaptureForm = () => {
   const [formData, setFormData] = useState({ name: '', email: '', industry: '' });
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [leads, setLeads] = useState<
     Array<{ name: string; email: string; industry: string; submitted_at: string }>
   >([]);
 
-  useEffect(() => {
-    setSubmitted(false);
-  }, []);
   const getFieldError = (field: string) => {
     return validationErrors.find(error => error.field === field)?.message;
   };
@@ -26,47 +24,53 @@ export const LeadCaptureForm = () => {
     setValidationErrors(errors);
 
     if (errors.length === 0) {
-      // Save to database
-    try {
-      const { error: insertError } = await supabase.from('leads').insert([{
-        name: formData.name,
-        email: formData.email,
-        industry: formData.industry,
-      }]);
-
-      if (insertError) throw insertError;
-      else console.log('Lead inserted successfully:');
-      
-    } catch (insertError) {
-      console.error('Error inserting lead:', insertError);
-    }
-
-      // Send confirmation email
+      setIsSubmitting(true);
       try {
-        const { error: emailError } = await supabase.functions.invoke('send-confirmation', {
-          body: {
-            name: formData.name,
-            email: formData.email,
-            industry: formData.industry,
-          },
-        });
+        // Save to database
+        try {
+          const { error: insertError } = await supabase.from('leads').insert([
+            {
+              name: formData.name,
+              email: formData.email,
+              industry: formData.industry,
+            },
+          ]);
 
-        if (emailError) throw emailError;
-        else console.log('Confirmation email sent successfully:');
+          if (insertError) throw insertError;
+          else console.log('Lead inserted successfully:');
+        } catch (insertError) {
+          console.error('Error inserting lead:', insertError);
+        }
 
-      } catch (emailError) {
-        console.error('Error calling email function:', emailError);
+        // Send confirmation email
+        try {
+          const { error: emailError } = await supabase.functions.invoke('send-confirmation', {
+            body: {
+              name: formData.name,
+              email: formData.email,
+              industry: formData.industry,
+            },
+          });
+
+          if (emailError) throw emailError;
+          else console.log('Confirmation email sent successfully:');
+        } catch (emailError) {
+          console.error('Error calling email function:', emailError);
+        }
+
+        const lead = {
+          name: formData.name,
+          email: formData.email,
+          industry: formData.industry,
+          submitted_at: new Date().toISOString(),
+        };
+        setLeads([...leads, lead]);
+        setSubmitted(true);
+        setFormData({ name: '', email: '', industry: '' });
+      } finally {
+        // Ensure we reset loading state if the success screen doesn't immediately replace the form
+        setIsSubmitting(false);
       }
-
-      const lead = {
-        name: formData.name,
-        email: formData.email,
-        industry: formData.industry,
-        submitted_at: new Date().toISOString(), 
-      };
-      setLeads([...leads, lead]);
-      setSubmitted(true);
-      setFormData({ name: '', email: '', industry: '' });
     }
   };
 
@@ -129,7 +133,13 @@ export const LeadCaptureForm = () => {
 
   return (
     <div className="w-full max-w-md mx-auto">
-      <div className="bg-gradient-card p-8 rounded-2xl shadow-card border border-border backdrop-blur-sm animate-slide-up">
+      <div className="relative bg-gradient-card p-8 rounded-2xl shadow-card border border-border backdrop-blur-sm animate-slide-up">
+        {isSubmitting && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm rounded-2xl z-20 animate-fade-in">
+            <Loader2 className="w-8 h-8 text-primary animate-spin mb-3" />
+            <p className="text-sm text-muted-foreground">Submitting...</p>
+          </div>
+        )}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-gradient-primary rounded-full flex items-center justify-center mx-auto mb-4 shadow-glow">
             <Mail className="w-8 h-8 text-primary-foreground" />
@@ -137,8 +147,12 @@ export const LeadCaptureForm = () => {
           <h2 className="text-2xl font-bold text-foreground mb-2">Join Our Community</h2>
           <p className="text-muted-foreground">Be the first to know when we launch</p>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Accessible live region for submission status */}
+          <output className="sr-only" aria-live="polite">
+            {isSubmitting ? 'Submitting your information...' : 'Form ready'}
+          </output>
+          <div className={isSubmitting ? 'opacity-60 pointer-events-none space-y-6' : 'space-y-6'}>
           <div className="space-y-2">
             <div className="relative">
               <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -150,6 +164,7 @@ export const LeadCaptureForm = () => {
                 className={`pl-10 h-12 bg-input border-border text-foreground placeholder:text-muted-foreground transition-smooth
                   ${getFieldError('name') ? 'border-destructive' : 'focus:border-accent focus:shadow-glow'}
                 `}
+                disabled={isSubmitting}
               />
             </div>
             {getFieldError('name') && (
@@ -168,6 +183,7 @@ export const LeadCaptureForm = () => {
                 className={`pl-10 h-12 bg-input border-border text-foreground placeholder:text-muted-foreground transition-smooth
                   ${getFieldError('email') ? 'border-destructive' : 'focus:border-accent focus:shadow-glow'}
                 `}
+                disabled={isSubmitting}
               />
             </div>
             {getFieldError('email') && (
@@ -178,7 +194,7 @@ export const LeadCaptureForm = () => {
           <div className="space-y-2">
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
-              <Select value={formData.industry} onValueChange={(value) => handleInputChange('industry', value)}>
+              <Select value={formData.industry} onValueChange={(value) => handleInputChange('industry', value)} disabled={isSubmitting}>
                 <SelectTrigger className={`pl-10 h-12 bg-input border-border text-foreground transition-smooth
                   ${getFieldError('industry') ? 'border-destructive' : 'focus:border-accent focus:shadow-glow'}
                 `}>
@@ -203,11 +219,22 @@ export const LeadCaptureForm = () => {
 
           <Button
             type="submit"
-            className="w-full h-12 bg-gradient-primary text-primary-foreground font-semibold rounded-lg shadow-glow hover:shadow-[0_0_60px_hsl(210_100%_60%/0.3)] transition-smooth transform hover:scale-[1.02]"
+            disabled={isSubmitting}
+            className="w-full h-12 bg-gradient-primary text-primary-foreground font-semibold rounded-lg shadow-glow hover:shadow-[0_0_60px_hsl(210_100%_60%/0.3)] transition-smooth transform hover:scale-[1.02] disabled:opacity-70 disabled:hover:scale-100"
           >
-            <CheckCircle className="w-5 h-5 mr-2" />
-            Get Early Access
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-5 h-5 mr-2" />
+                Get Early Access
+              </>
+            )}
           </Button>
+          </div>
         </form>
 
         <p className="text-xs text-muted-foreground text-center mt-6">
