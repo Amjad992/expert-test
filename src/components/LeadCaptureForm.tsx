@@ -91,7 +91,7 @@ export const LeadCaptureForm = () => {
             </div>
           </div>
 
-          <h2 className="text-3xl font-bold text-foreground mb-3">Welcome aboard! 🎉</h2>
+          <h2 className="text-3xl font-bold text-foreground mb-3">Welcome aboard {leads[leads.length - 1].name}! 🎉</h2>
 
           <p className="text-muted-foreground mb-2">
             Thanks for joining! We'll be in touch soon with updates.
