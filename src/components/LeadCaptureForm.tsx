@@ -1,16 +1,21 @@
-import { useState, useEffect } from 'react';
-import { Mail, User, CheckCircle, Building2, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Mail, User, CheckCircle, Building2, Loader2, AlertCircle, RefreshCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { validateLeadForm, ValidationError } from '@/lib/validation';
 import { supabase } from '@/integrations/supabase/client';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { error } from 'console';
 
 export const LeadCaptureForm = () => {
   const [formData, setFormData] = useState({ name: '', email: '', industry: '' });
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
+  const [leadError, setLeadError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [leads, setLeads] = useState<
     Array<{ name: string; email: string; industry: string; submitted_at: string }>
   >([]);
@@ -18,59 +23,108 @@ export const LeadCaptureForm = () => {
   const getFieldError = (field: string) => {
     return validationErrors.find(error => error.field === field)?.message;
   };
+
+  const getErrorMessage = (err: unknown, fallbackMessage: string = 'Unexpected error occurred.') => {
+    const message = err && typeof err === 'object' && 'message' in err ? (err as { message?: string }).message : undefined;
+    return message || fallbackMessage;
+  };
+
+  // Types
+  type LeadInput = { name: string; email: string; industry: string };
+
+  // Helper: Save lead to Supabase
+  const saveLead = async (data: LeadInput): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { error } = await supabase.from('leads').insert([
+        { name: data.name, email: data.email, industry: data.industry },
+      ]);
+      if (error) {
+        return { success: false, error: error.message || 'Failed to save lead.' };
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, 'Unexpected error while saving lead.');
+      return { success: false, error: message };
+    }
+  };
+
+  // Helper: Send confirmation email (non-critical)
+  const sendConfirmationEmail = async (data: LeadInput): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { error } = await supabase.functions.invoke('send-confirmation', {
+        body: { name: data.name, email: data.email, industry: data.industry },
+      });
+      if (error) {
+        return { success: false, error: error.message || 'Failed to send confirmation email.' };
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      console.log("Error sending confirmation email:11", err);
+      const message = getErrorMessage(err, 'Unexpected error while sending email.');
+      return { success: false, error: message };
+    }
+  };
+
+  const resendEmail = async () => {
+    if (!leads.length) return;
+    setIsResendingEmail(true);
+    setEmailError(null);
+    const lastLead = leads[leads.length - 1];
+    try {
+      const result = await sendConfirmationEmail({ name: lastLead.name, email: lastLead.email, industry: lastLead.industry });
+      if (!result.success) {
+        setEmailError(result.error || 'Still unable to send the confirmation email.');
+      }
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, 'Unexpected error while resending email.');
+      setEmailError(message);
+    } finally {
+      setIsResendingEmail(false);
+    }
+  };
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Reset previous errors (not form state)
+    setLeadError(null);
+    setEmailError(null);
+
     const errors = validateLeadForm(formData);
     setValidationErrors(errors);
+    if (errors.length > 0) return;
 
-    if (errors.length === 0) {
-      setIsSubmitting(true);
-      try {
-        // Save to database
-        try {
-          const { error: insertError } = await supabase.from('leads').insert([
-            {
-              name: formData.name,
-              email: formData.email,
-              industry: formData.industry,
-            },
-          ]);
+    setIsSubmitting(true);
 
-          if (insertError) throw insertError;
-          else console.log('Lead inserted successfully:');
-        } catch (insertError) {
-          console.error('Error inserting lead:', insertError);
-        }
-
-        // Send confirmation email
-        try {
-          const { error: emailError } = await supabase.functions.invoke('send-confirmation', {
-            body: {
-              name: formData.name,
-              email: formData.email,
-              industry: formData.industry,
-            },
-          });
-
-          if (emailError) throw emailError;
-          else console.log('Confirmation email sent successfully:');
-        } catch (emailError) {
-          console.error('Error calling email function:', emailError);
-        }
-
-        const lead = {
-          name: formData.name,
-          email: formData.email,
-          industry: formData.industry,
-          submitted_at: new Date().toISOString(),
-        };
-        setLeads([...leads, lead]);
-        setSubmitted(true);
-        setFormData({ name: '', email: '', industry: '' });
-      } finally {
-        // Ensure we reset loading state if the success screen doesn't immediately replace the form
-        setIsSubmitting(false);
+    try {
+      // 1. Save lead (critical)
+      const saveResult = await saveLead(formData);
+      if (!saveResult.success) {
+        setLeadError(saveResult.error || 'Failed to save your information. Please try again.');
+        return;
       }
+
+      // 2. Send confirmation email (non-critical)
+      const emailResult = await sendConfirmationEmail(formData);
+      if (!emailResult.success) {
+        setEmailError(emailResult.error || 'We could not send a confirmation email right now.');
+      }
+
+      // 3. Mark success and store in local state.
+      const lead = {
+        name: formData.name,
+        email: formData.email,
+        industry: formData.industry,
+        submitted_at: new Date().toISOString(),
+      };
+      setLeads(prev => [...prev, lead]);
+      setSubmitted(true);
+      setFormData({ name: '', email: '', industry: '' });
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, 'Unexpected error occurred.');
+      setLeadError(message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -100,6 +154,22 @@ export const LeadCaptureForm = () => {
           <p className="text-sm text-accent mb-8">
             You're #{leads.length} in this session
           </p>
+
+          {emailError && (
+            <Alert variant="default" className="mb-6 text-left border-accent/40 bg-accent/10">
+              <AlertCircle className="h-5 w-5" />
+              <AlertTitle>Email Pending</AlertTitle>
+              <AlertDescription>
+                We saved your info, but couldn't send the confirmation email yet.<br />
+                <span className="font-medium">Reason:</span> {emailError}
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" disabled={isResendingEmail} onClick={resendEmail} className="flex items-center gap-1">
+                    {isResendingEmail && <Loader2 className="w-4 h-4 animate-spin" />}<RefreshCcw className="w-4 h-4" /> Retry Email
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
           <div className="space-y-4">
             <div className="p-4 bg-accent/10 rounded-lg border border-accent/20">
@@ -152,6 +222,16 @@ export const LeadCaptureForm = () => {
           <output className="sr-only" aria-live="polite">
             {isSubmitting ? 'Submitting your information...' : 'Form ready'}
           </output>
+          {leadError && (
+            <Alert variant="destructive" className="border-destructive/50">
+              <AlertCircle className="h-5 w-5" />
+              <AlertTitle>Submission Failed</AlertTitle>
+              <AlertDescription>
+                We couldn't save your information: {leadError}
+                <br />Please try again later. If the issue continue, reach out to us to report the problem.
+              </AlertDescription>
+            </Alert>
+          )}
           <div className={isSubmitting ? 'opacity-60 pointer-events-none space-y-6' : 'space-y-6'}>
           <div className="space-y-2">
             <div className="relative">
