@@ -42,7 +42,7 @@ const generatePersonalizedContent = async (name: string, industry: string) => {
     });
 
     const data = await response.json();
-    return data?.choices[1]?.message?.content;
+    return data?.choices[0]?.message?.content;
   } catch (error) {
     console.error('Error generating personalized content:', error);
     // Fallback content
