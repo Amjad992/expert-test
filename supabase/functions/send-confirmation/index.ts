@@ -67,7 +67,7 @@ const handler = async (req: Request): Promise<Response> => {
     console.log(`Generated content: ${personalizedContent}`);
 
     const emailResponse = await resend.emails.send({
-      from: "Innovation Community <testing-email@lovable.dev>",
+      from: "Innovation Community <testing-email@desolint.com>",
       to: [email],
       subject: `Welcome to the Innovation Revolution, ${name}! 🚀`,
       html: `
