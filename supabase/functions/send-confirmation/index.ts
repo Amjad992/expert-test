@@ -102,7 +102,9 @@ const handler = async (req: Request): Promise<Response> => {
       `,
     });
 
-    console.log("Personalized email sent successfully:", emailResponse);
+    if (emailResponse.error) throw new Error(emailResponse.error.error);
+    else console.log("Personalized email sent successfully:", emailResponse);
+    
 
     return new Response(JSON.stringify({ success: true, emailId: emailResponse.data?.id }), {
       status: 200,
@@ -111,10 +113,11 @@ const handler = async (req: Request): Promise<Response> => {
         ...corsHeaders,
       },
     });
-  } catch (error: any) {
-    console.error("Error in send-confirmation function:", error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error("Error in send-confirmation function:",  message);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: message }),
       {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
